@@ -23,6 +23,7 @@ v
 |
 v
 [Rule Engine] --> match against YAML rules --> ALLOW / DENY (default: DENY)
+
 ## Tech Stack
 - Python 3.10
 - Scapy (packet sniffing/crafting)
@@ -45,16 +46,20 @@ sudo venv/bin/python src/firewall.py
 
 **Normal traffic — stateful ALLOW tracking:**
 A single incoming request on port 80 is allowed by rule match; the response traffic is automatically permitted via the connection state table, without a second rule lookup.
-
+[ALLOW] 172.18.172.236:37976 -> 172.66.147.243:80 (tcp)
+[ALLOW-ESTABLISHED] 172.66.147.243:80 -> 172.18.172.236:37976 (tcp)
 ![Allow established demo](docs/screenshots/allow-established-demo.png)
 
 **SYN flood attack — detection and auto-block:**
-A simulated SYN flood from a single spoofed IP is detected once it crosses the rate threshold (50 SYNs / 10s), after which every further packet from that IP is automatically blocked.
+A simulated flood of 100 spoofed SYN packets from a single source IP is detected once it crosses the rate threshold (50 SYNs / 10s), after which every further packet from that IP is automatically blocked — all within under a second of the flood starting.
 
 ```bash
 sudo venv/bin/python tests/simulate_synflood.py
 ```
-
+[ALLOW] 10.0.0.99:16979 -> 127.0.0.1:80 (tcp)
+[ALERT] SYN flood detected from 10.0.0.99 — auto-blocking
+[BLOCKED] 10.0.0.99:33338 -> 127.0.0.1:80 (auto-blocked IP)
+[BLOCKED] 10.0.0.99:51294 -> 127.0.0.1:80 (auto-blocked IP)
 ![SYN flood autoblock demo](docs/screenshots/synflood-autoblock-demo.png)
 
 ## Rule Configuration Example (`config/rules.yaml`)
@@ -78,10 +83,13 @@ rules:
 pytest
 ```
 
+## Notes
+Developed and tested on WSL2 (Ubuntu 22.04). Packet capture is scoped to specific interfaces and ports using BPF filters (e.g. `iface="lo", filter="tcp port 80"`) for reliable, reproducible demonstration in a virtualized network environment.
+
 ## Limitations / Future Work
 - Currently logs decisions rather than dropping packets at the kernel level (would require NFQUEUE/iptables integration for true enforcement)
 - Rate-limiting thresholds are static — could be made adaptive based on traffic baseline
 - No persistence of blocklist across restarts
 
 ## What I Learned
-Building the stateful connection table required understanding TCP's three-way handshake and how firewalls distinguish "new" vs "established" traffic — the core concept behind how real stateful firewalls (like iptables' conntrack module) work under the hood.
+Building the stateful connection table required understanding TCP's three-way handshake and how firewalls distinguish "new" vs "established" traffic — the core concept behind how real stateful firewalls (like Linux's `iptables`/`conntrack` module) work under the hood, tracking connections by a 5-tuple (source IP, source port, destination IP, destination port, protocol) in a kernel-level hash table for fast lookups.
